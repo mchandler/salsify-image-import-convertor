@@ -1,0 +1,16 @@
+{
+  "name": "salsify-export-conversion",
+  "version": "1.0.0",
+  "description": "Transforms a Salsify image export CSV into a target CSV format.",
+  "main": "transform-images.js",
+  "scripts": {
+    "start": "node transform-images.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "csv-stringify": "^6.5.1"
+  }
+}
