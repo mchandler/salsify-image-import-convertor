@@ -84,31 +84,26 @@ parser.on('readable', () => {
 
     const sku = clean(record[0]);
     const title = clean(record[2]);
-    const primary1 = record[3];
-    const primary2 = record[4];
-    const secondary1 = record[5];
-    const secondary2 = record[6];
+    const candidates = [record[3], record[4], record[5], record[6]].filter(isNonEmpty);
 
-    if (!isNonEmpty(primary1)) {
+    if (candidates.length === 0 || !isNonEmpty(record[3]) && !isNonEmpty(record[4])) {
       skippedRowCount++;
       continue;
     }
 
-    const p1 = clean(primary1).trim();
-    stringifier.write({ title, URL: p1, SKU: sku, imageType: 'productListImage' });
-    stringifier.write({ title, URL: p1, SKU: sku, imageType: 'productDetailImage' });
+    const primary = clean(candidates[0]).trim();
+    stringifier.write({ title, URL: primary, SKU: sku, imageType: 'productListImage' });
+    stringifier.write({ title, URL: primary, SKU: sku, imageType: 'productDetailImage' });
     outputRowCount += 2;
 
-    for (const img of [primary2, secondary1, secondary2]) {
-      if (isNonEmpty(img)) {
-        stringifier.write({
-          title,
-          URL: clean(img).trim(),
-          SKU: sku,
-          imageType: 'productDetailImage',
-        });
-        outputRowCount++;
-      }
+    for (let k = 1; k < candidates.length; k++) {
+      stringifier.write({
+        title,
+        URL: clean(candidates[k]).trim(),
+        SKU: sku,
+        imageType: 'productDetailImage',
+      });
+      outputRowCount++;
     }
   }
 });
