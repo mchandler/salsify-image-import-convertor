@@ -83,7 +83,7 @@ parser.on('readable', () => {
     sourceRowCount++;
 
     const sku = clean(record[0]);
-    const title = clean(record[2]);
+    const title = clean(record[2]).replace(/"/g, 'in').replace(/'/g, 'ft').replace(/[,;.]/g, '');
     const candidates = [record[3], record[4], record[5], record[6]].filter(isNonEmpty);
 
     if (candidates.length === 0 || !isNonEmpty(record[3]) && !isNonEmpty(record[4])) {
