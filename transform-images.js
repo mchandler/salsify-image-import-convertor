@@ -9,16 +9,25 @@ const { stringify } = require('csv-stringify');
 
 const args = process.argv.slice(2);
 if (args.length < 1) {
-  console.error('Usage: node transform-images.js <input.csv>');
+  console.error('Usage: node transform-images.js <input.csv> [--chunk <rows>]');
   process.exit(1);
 }
 
 const inputArg = args[0];
 const inputPath = path.resolve(process.cwd(), inputArg);
-
 const parsedName = path.parse(inputArg);
-const outputName = `${parsedName.name}-output${parsedName.ext || '.csv'}`;
-const outputPath = path.resolve(process.cwd(), outputName);
+
+let chunkSize = 0;
+const chunkIdx = args.indexOf('--chunk');
+if (chunkIdx !== -1 && args[chunkIdx + 1]) {
+  chunkSize = parseInt(args[chunkIdx + 1], 10);
+  if (isNaN(chunkSize) || chunkSize <= 0) {
+    console.error('--chunk value must be a positive number');
+    process.exit(1);
+  }
+}
+
+const COLUMNS = ['title', 'url', 'SKU', 'imageType'];
 
 const LITERAL_ESCAPE_RE = /\\x[0-9a-fA-F]{2}/g;
 function clean(value) {
@@ -42,6 +51,46 @@ function isNonEmpty(value) {
   return value != null && String(value).trim() !== '';
 }
 
+let fileIndex = 1;
+let currentStringifier = null;
+let currentWriteStream = null;
+let currentFileRowCount = 0;
+const outputFiles = [];
+
+function openOutputFile() {
+  if (currentStringifier) {
+    currentStringifier.end();
+  }
+  const suffix = chunkSize > 0 ? `-${fileIndex}` : '';
+  const name = `${parsedName.name}-output${suffix}${parsedName.ext || '.csv'}`;
+  const filePath = path.resolve(process.cwd(), name);
+  outputFiles.push(filePath);
+
+  currentWriteStream = fs.createWriteStream(filePath);
+  currentWriteStream.on('error', (err) => {
+    console.error(`Failed to write output file: ${err.message}`);
+    process.exit(1);
+  });
+
+  currentStringifier = stringify({
+    header: true,
+    columns: COLUMNS,
+    record_delimiter: '\n',
+  });
+  currentStringifier.pipe(currentWriteStream);
+  currentFileRowCount = 0;
+  fileIndex++;
+}
+
+function writeRow(row) {
+  if (!currentStringifier || (chunkSize > 0 && currentFileRowCount >= chunkSize)) {
+    openOutputFile();
+  }
+  currentStringifier.write(row);
+  currentFileRowCount++;
+  outputRowCount++;
+}
+
 let sourceRowCount = 0;
 let outputRowCount = 0;
 let skippedRowCount = 0;
@@ -53,25 +102,12 @@ const parser = parse({
   skip_empty_lines: true,
 });
 
-const stringifier = stringify({
-  header: true,
-  columns: ['title', 'url', 'SKU', 'imageType'],
-  record_delimiter: '\n',
-});
-
 const readStream = fs.createReadStream(inputPath);
-const writeStream = fs.createWriteStream(outputPath);
 
 readStream.on('error', (err) => {
   console.error(`Failed to read input file: ${err.message}`);
   process.exit(1);
 });
-writeStream.on('error', (err) => {
-  console.error(`Failed to write output file: ${err.message}`);
-  process.exit(1);
-});
-
-stringifier.pipe(writeStream);
 
 parser.on('readable', () => {
   let record;
@@ -83,7 +119,8 @@ parser.on('readable', () => {
     sourceRowCount++;
 
     const sku = clean(record[0]);
-    const title = clean(record[2]).replace(/"/g, 'in').replace(/'/g, 'ft').replace(/[,;.]/g, '');
+    let title = clean(record[2]).replace(/"/g, 'in').replace(/'/g, 'ft').replace(/[,;.]/g, '').trim();
+    if (!title) title = `${sku}-Image`;
     const candidates = [record[3], record[4], record[5], record[6]].filter(isNonEmpty);
 
     if (candidates.length === 0 || !isNonEmpty(record[3]) && !isNonEmpty(record[4])) {
@@ -92,18 +129,16 @@ parser.on('readable', () => {
     }
 
     const primary = clean(candidates[0]).trim();
-    stringifier.write({ title, url: primary, SKU: sku, imageType: 'productListImage' });
-    stringifier.write({ title, url: primary, SKU: sku, imageType: 'productDetailImage' });
-    outputRowCount += 2;
+    writeRow({ title, url: primary, SKU: sku, imageType: 'productListImage' });
+    writeRow({ title, url: primary, SKU: sku, imageType: 'productDetailImage' });
 
     for (let k = 1; k < candidates.length; k++) {
-      stringifier.write({
+      writeRow({
         title,
         url: clean(candidates[k]).trim(),
         SKU: sku,
         imageType: 'productDetailImage',
       });
-      outputRowCount++;
     }
   }
 });
@@ -114,15 +149,40 @@ parser.on('error', (err) => {
 });
 
 parser.on('end', () => {
-  stringifier.end();
+  if (currentStringifier) {
+    currentStringifier.end();
+  }
 });
 
-writeStream.on('finish', () => {
-  console.log('Done.');
-  console.log(`  Source rows processed: ${sourceRowCount}`);
-  console.log(`  Output rows written:   ${outputRowCount}`);
-  console.log(`  Rows skipped:          ${skippedRowCount}`);
-  console.log(`  Output file:           ${outputPath}`);
+let filesFinished = 0;
+function checkDone() {
+  filesFinished++;
+  if (filesFinished === outputFiles.length) {
+    console.log('Done.');
+    console.log(`  Source rows processed: ${sourceRowCount}`);
+    console.log(`  Output rows written:   ${outputRowCount}`);
+    console.log(`  Rows skipped:          ${skippedRowCount}`);
+    console.log(`  Output files:          ${outputFiles.length}`);
+    outputFiles.forEach((f) => console.log(`    ${f}`));
+  }
+}
+
+parser.on('end', () => {
+  if (outputFiles.length === 0) {
+    console.log('Done. No output rows produced.');
+    return;
+  }
+  outputFiles.forEach((f) => {
+    const ws = fs.createWriteStream(f, { flags: 'r' });
+    ws.on('error', () => {});
+    ws.close();
+  });
 });
+
+const origOpen = openOutputFile;
+openOutputFile = function () {
+  origOpen();
+  currentWriteStream.on('finish', checkDone);
+};
 
 readStream.pipe(stripHighBytes).pipe(parser);
