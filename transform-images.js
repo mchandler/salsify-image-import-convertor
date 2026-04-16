@@ -23,7 +23,7 @@ const outputPath = path.resolve(process.cwd(), outputName);
 const LITERAL_ESCAPE_RE = /\\x[0-9a-fA-F]{2}/g;
 function clean(value) {
   if (value == null) return '';
-  return String(value).replace(LITERAL_ESCAPE_RE, '');
+  return String(value).replace(LITERAL_ESCAPE_RE, '').replace(/^http:\/\//i, 'https://');
 }
 
 const stripHighBytes = new Transform({
@@ -55,7 +55,7 @@ const parser = parse({
 
 const stringifier = stringify({
   header: true,
-  columns: ['title', 'URL', 'SKU', 'imageType'],
+  columns: ['title', 'url', 'SKU', 'imageType'],
   record_delimiter: '\n',
 });
 
@@ -92,14 +92,14 @@ parser.on('readable', () => {
     }
 
     const primary = clean(candidates[0]).trim();
-    stringifier.write({ title, URL: primary, SKU: sku, imageType: 'productListImage' });
-    stringifier.write({ title, URL: primary, SKU: sku, imageType: 'productDetailImage' });
+    stringifier.write({ title, url: primary, SKU: sku, imageType: 'productListImage' });
+    stringifier.write({ title, url: primary, SKU: sku, imageType: 'productDetailImage' });
     outputRowCount += 2;
 
     for (let k = 1; k < candidates.length; k++) {
       stringifier.write({
         title,
-        URL: clean(candidates[k]).trim(),
+        url: clean(candidates[k]).trim(),
         SKU: sku,
         imageType: 'productDetailImage',
       });
